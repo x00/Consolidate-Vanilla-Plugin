@@ -1,0 +1,17 @@
+Fri Mar 15 00:34:23 GMT 2013: 0.1.4b
+- added PATH_ROOT to Origional files
+Fri Mar 15 23:43:01 GMT 2013: 0.1.5b
+- added ExpireDeadCacheFiles
+- external JS defer sort before local
+- clear cache button
+Thu May  1 11:36:40 BST 2014: 0.1.6b
+- 2.1 support
+- sub-domain friendly
+Thu May  1 14:52:57 BST 2014: 0.1.7b
+- remove redundant in array $GlobalJS
+Fri May  2 08:51:46 BST 2014: 0.1.8b
+- preg_match format bug
+Fri May  2 15:56:10 BST 2014: 0.1.9b
+- cdn files load first
+
+
