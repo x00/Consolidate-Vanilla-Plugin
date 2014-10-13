@@ -23,7 +23,6 @@ if(!class_exists('Minify_CSS_Compressor')){
 }
 
 if(C('Plugins.Consolidate.DeferJs') && !class_exists('HeadModule', FALSE)){
-    echo "hi"; exit;
     include_once(CONSOLIDATE_ROOT.DS.'class.headmodule.php');
 }
 
