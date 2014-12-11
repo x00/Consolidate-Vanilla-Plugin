@@ -414,6 +414,9 @@ class Consolidate extends Gdn_Plugin {
         return $Token;
       if (!file_exists($CacheFile)) {
           $ConsolidateFile = '';
+          $PathRootParts = split(DS,PATH_ROOT);
+          $WebRootParts = split(DS,$this->WebRoot);
+          $Base = join(DS,array_slice($PathRootParts,0,-count($WebRootParts)));
           foreach($Files As $File){
               $ConsolidateFile .= "/*\n";
               $ConsolidateFile .= "* Consolidate '{$File['fullhref']}'\n";
@@ -421,8 +424,7 @@ class Consolidate extends Gdn_Plugin {
               $OriginalFile = PATH_ROOT.DS.$File['href'];
               $FileStr = file_get_contents($OriginalFile);
               if($FileStr && strtolower($Suffix)=='.css'){
-                 
-                  $FileStr = Minify_CSS_UriRewriter::rewrite($FileStr,dirname($OriginalFile),str_replace($this->WebRoot,'',PATH_ROOT));
+                  $FileStr = Minify_CSS_UriRewriter::rewrite($FileStr,dirname($Base.DS.$this->WebRoot.DS.$File['href']),$Base);
                   $FileStr = Minify_CSS_Compressor::process($FileStr);
               }
               $ConsolidateFile .= trim($FileStr);

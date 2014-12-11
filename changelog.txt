@@ -13,5 +13,7 @@ Fri May  2 08:51:46 BST 2014: 0.1.8b
 - preg_match format bug
 Fri May  2 15:56:10 BST 2014: 0.1.9b
 - cdn files load first
+Thu Dec 11 10:18:12 GMT 2014: 0.1.10b
+- base fix on complicated setups
 
 
