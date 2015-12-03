@@ -2,12 +2,11 @@
 $PluginInfo['Consolidate'] = array(
    'Name' => 'Consolidate',
    'Description' => 'Combine resources (js, css) according to regex patterns, to have the ideal number of requests, and minimise bloat.',
-   'Version' => '0.1.10b',
-   'RequiredApplications' => array('Vanilla' => '2.0.18'),
+   'Version' => '0.2.0b',
+   'RequiredApplications' => array('Vanilla' => '2.2'),
    'Author' => "Paul Thomas",
    'AuthorEmail' => 'dt01pq_pt@yahoo.com',
    'AuthorUrl' => 'http://vanillaforums.org/profile/x00',
-   'RequiredApplications' => array('Vanilla' => '2.0.18'),
    'SettingsUrl' => '/dashboard/settings/consolidate',
    'MobileFriendy' => TRUE
 );
@@ -15,9 +14,11 @@ $PluginInfo['Consolidate'] = array(
 
 
 define('CONSOLIDATE_ROOT', dirname(__FILE__));
+
 if(!class_exists('Minify_CSS_UriRewriter')){
     include_once(CONSOLIDATE_ROOT.DS.'CSS'.DS.'UriRewriter.php');
 }
+
 if(!class_exists('Minify_CSS_Compressor')){
     include_once(CONSOLIDATE_ROOT.DS.'CSS'.DS.'Compressor.php');
 }
@@ -97,6 +98,7 @@ class Consolidate extends Gdn_Plugin {
             ),
             '.css' => array(
                 '/?applications/.*',
+                '/?resources/.*',
                 '/?plugins/.*',
                 '/?themes/.*',
                 '.*'
@@ -192,6 +194,12 @@ class Consolidate extends Gdn_Plugin {
             $Href = GetValue('href', $Tag, '!');
         } else {
             $Href = GetValue('src', $Tag, '!');
+            
+            if(isset($Tag[HeadModule::CONTENT_KEY])) {
+                $Href = '!';
+                unset($Tags[$Index]['src']);
+            }
+            
             if(C('Plugins.Consolidate.DeferJs') && $Href=='!'){
                 $this->InlineJs[] = $Tag;
                 unset($Tags[$Index]);
