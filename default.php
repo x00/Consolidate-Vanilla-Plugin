@@ -413,7 +413,8 @@ class Consolidate extends Gdn_Plugin {
                }
            }
            if(!$found) {
-               $ChunkedFiles[$File['href']][] = $File;
+               $NiceKey = trim(Gdn_Format::Url(preg_replace('`[^a-z0-9]+`i','_',$File['href'])),'_').'_';
+               $ChunkedFiles[$NiceKey][] = $File;
            }
        }
        
