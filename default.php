@@ -257,8 +257,12 @@ class Consolidate extends Gdn_Plugin {
       $ChunkedFilesTemp = $this->ChunkedFiles;
       $ChunkedCss = $this->_Chunk($CssToCache, '.css');
       foreach($ChunkedCss As $CssChunkGroup => $CssChunk){
-        $Token = $this->_Consolidate($CssChunk, '.css', $CssChunkGroup);
-        $Head->AddCss("/cache/Consolidate/$Token", 'screen', FALSE);
+        if(count($CssChunk)==1) {
+          $Head->AddCss('/'.$CssChunk[0]['href'], 'screen', true);
+        } else {
+          $Token = $this->_Consolidate($CssChunk, '.css', $CssChunkGroup);
+          $Head->AddCss("/cache/Consolidate/$Token", 'screen', FALSE);
+        }
       }
       $Head = $this->_SeperateInlineScripts($Head);
       Gdn::Controller()->Assets['Head'] = $Head;
