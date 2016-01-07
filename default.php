@@ -144,8 +144,8 @@ class Consolidate extends Gdn_Plugin {
                 $I = array_search('.*',$ChunkGroups[$Ext]);
                 if($I > -1){
                     unset($ChunkGroups[$Ext][$I]);
+                    $ChunkGroups[$Ext][] = '.*';
                 }
-                $ChunkGroups[$Ext][] = '.*';
             } 
             SaveToConfig('Plugins.Consolidate.DeferJs',GetValue('DeferJs',$FormValues) ? TRUE : FALSE);
             if(!empty($ChunkGroups)){
@@ -399,15 +399,22 @@ class Consolidate extends Gdn_Plugin {
        if(empty($Chunks))
             return array(Gdn_Format::Url('.*')=>$Files);
        $ChunkedFiles = array();
-       foreach($Chunks As $Chunk){
-           foreach($Files As $FileIndex => $File){
+       foreach($Files As $FileIndex => $File){
+           $found = false;
+           foreach($Chunks As $Chunk){
                if(preg_match('`^'.$Chunk.'`', $File['href'])){
                    $NiceKey = trim(Gdn_Format::Url(preg_replace('`[^a-z0-9]+`i','_',$Chunk)),'_').'_';
                    if(!GetValue($NiceKey,$ChunkedFile))
                         $ChunkedFile[$NiceKey] = array();
                    $ChunkedFiles[$NiceKey][] = $File;
                    unset($Files[$FileIndex]);
+                   $found = true;
+                   break;
                }
+           }
+           if(!$found) {
+               $NiceKey = trim(Gdn_Format::Url(preg_replace('`[^a-z0-9]+`i','_',$File['href'])),'_').'_';
+               $ChunkedFiles[$NiceKey][] = $File;
            }
        }
        
