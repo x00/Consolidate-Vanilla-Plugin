@@ -418,37 +418,36 @@ class Consolidate extends Gdn_Plugin {
    protected function _Consolidate($Files, $Suffix, $Prefix = '') { 
       $Token = $Prefix.md5(serialize($Files)).$Suffix;
       $CacheFile = PATH_CACHE."/Consolidate/$Token";
-      if(in_array($Token,$this->ChunkedFiles))
+      $mtime = function($File) { return filemtime(PATH_ROOT.DS.$File['href']); };
+      if(in_array($Token,$this->ChunkedFiles) && max(array_map($mtime, $Files)) < filemtime($CacheFile))
         return $Token;
-      if (!file_exists($CacheFile)) {
-          $ConsolidateFile = '';
-          $PathRootParts = split(DS,PATH_ROOT);
-          $WebRootParts = split(DS,$this->WebRoot);
-          $Base = join(DS,array_slice($PathRootParts,0,-count($WebRootParts)));
-          foreach($Files As $File){
-              $ConsolidateFile .= "/*\n";
-              $ConsolidateFile .= "* Consolidate '{$File['fullhref']}'\n";
-              $ConsolidateFile .= "*/\n\n";
-              $OriginalFile = PATH_ROOT.DS.$File['href'];
-              $FileStr = file_get_contents($OriginalFile);
-              if($FileStr && strtolower($Suffix)=='.css'){
-                  $FileStr = Minify_CSS_UriRewriter::rewrite($FileStr,dirname($Base.DS.$this->WebRoot.DS.$File['href']),$Base);
-                  $FileStr = Minify_CSS_Compressor::process($FileStr);
-              }
-              $ConsolidateFile .= trim($FileStr);
-              if($FileStr && strtolower($Suffix)=='.js'){
-                  if(substr($ConsolidateFile,-1)!=';')
-                    $ConsolidateFile .= ";";
-              }
-              $ConsolidateFile .= "\n\n";
-          }
-         if (!file_exists(dirname($CacheFile)))
-            mkdir(dirname($CacheFile), 0777, TRUE);
-         file_put_contents($CacheFile, $ConsolidateFile);
+      $ConsolidateFile = '';
+      $PathRootParts = split(DS,PATH_ROOT);
+      $WebRootParts = split(DS,$this->WebRoot);
+      $Base = join(DS,array_slice($PathRootParts,0,-count($WebRootParts)));
+      foreach($Files As $File){
+         $ConsolidateFile .= "/*\n";
+         $ConsolidateFile .= "* Consolidate '{$File['fullhref']}'\n";
+         $ConsolidateFile .= "*/\n\n";
+         $OriginalFile = PATH_ROOT.DS.$File['href'];
+         $FileStr = file_get_contents($OriginalFile);
+         if($FileStr && strtolower($Suffix)=='.css'){
+            $FileStr = Minify_CSS_UriRewriter::rewrite($FileStr,dirname($Base.DS.$this->WebRoot.DS.$File['href']),$Base);
+            $FileStr = Minify_CSS_Compressor::process($FileStr);
+         }
+         $ConsolidateFile .= trim($FileStr);
+         if($FileStr && strtolower($Suffix)=='.js'){
+            if(substr($ConsolidateFile,-1)!=';')
+              $ConsolidateFile .= ";";
+         }
+         $ConsolidateFile .= "\n\n";
       }
+      if (!file_exists(dirname($CacheFile)))
+         mkdir(dirname($CacheFile), 0777, TRUE);
+      file_put_contents($CacheFile, $ConsolidateFile);
       if(!in_array($Token,$this->ChunkedFiles))
           $this->ChunkedFiles[] = $Token;
-      
+
       return $Token;
    }
    
