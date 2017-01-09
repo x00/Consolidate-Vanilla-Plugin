@@ -1,4 +1,4 @@
-<?php
+<?php namespace Consolidate;
 /**
  * Class Minify_CSS_UriRewriter  
  * @package Minify
@@ -13,20 +13,14 @@
 class Minify_CSS_UriRewriter {
     
     /**
-     * Defines which class to call as part of callbacks, change this
-     * if you extend Minify_CSS_UriRewriter
-     * @var string
-     */
-    protected static $className = 'Minify_CSS_UriRewriter';
-    
-    /**
      * rewrite() and rewriteRelative() append debugging information here
+     *
      * @var string
      */
     public static $debugText = '';
     
     /**
-     * Rewrite file relative URIs as root relative in CSS files
+     * In CSS content, rewrite file relative URIs as root relative
      * 
      * @param string $css
      * 
@@ -54,7 +48,6 @@ class Minify_CSS_UriRewriter {
         );
         self::$_currentDir = self::_realpath($currentDir);
         self::$_symlinks = array();
-        
         // normalize symlinks
         foreach ($symlinks as $link => $target) {
             $link = ($link === '//')
@@ -63,7 +56,6 @@ class Minify_CSS_UriRewriter {
             $link = strtr($link, '/', DIRECTORY_SEPARATOR);
             self::$_symlinks[$link] = self::_realpath($target);
         }
-        
         self::$debugText .= "docRoot    : " . self::$_docRoot . "\n"
                           . "currentDir : " . self::$_currentDir . "\n";
         if (self::$_symlinks) {
@@ -72,18 +64,20 @@ class Minify_CSS_UriRewriter {
         self::$debugText .= "\n";
         
         $css = self::_trimUrls($css);
-        
+
+        $css = self::_owlifySvgPaths($css);
+
         // rewrite
         $css = preg_replace_callback('/@import\\s+([\'"])(.*?)[\'"]/'
             ,array(self::$className, '_processUriCB'), $css);
-        $css = preg_replace_callback('/url\\(\\s*([^\\)\\s]+)\\s*\\)/'
+        $css = preg_replace_callback('/url\\(\\s*([\'"](.*?)[\'"]|[^\\)\\s]+)\\s*\\)/'
             ,array(self::$className, '_processUriCB'), $css);
-
+        $css = self::_unOwlify($css);
         return $css;
     }
-    
+
     /**
-     * Prepend a path to relative URIs in CSS files
+     * In CSS content, prepend a path to relative URIs
      * 
      * @param string $css
      * 
@@ -96,84 +90,23 @@ class Minify_CSS_UriRewriter {
         self::$_prependPath = $path;
         
         $css = self::_trimUrls($css);
+
+        $css = self::_owlifySvgPaths($css);
         
         // append
         $css = preg_replace_callback('/@import\\s+([\'"])(.*?)[\'"]/'
             ,array(self::$className, '_processUriCB'), $css);
-        $css = preg_replace_callback('/url\\(\\s*([^\\)\\s]+)\\s*\\)/'
+        $css = preg_replace_callback('/url\\(\\s*([\'"](.*?)[\'"]|[^\\)\\s]+)\\s*\\)/'
             ,array(self::$className, '_processUriCB'), $css);
+
+        $css = self::_unOwlify($css);
 
         self::$_prependPath = null;
         return $css;
     }
     
-    
     /**
-     * @var string directory of this stylesheet
-     */
-    private static $_currentDir = '';
-    
-    /**
-     * @var string DOC_ROOT
-     */
-    private static $_docRoot = '';
-    
-    /**
-     * @var array directory replacements to map symlink targets back to their
-     * source (within the document root) E.g. '/var/www/symlink' => '/var/realpath'
-     */
-    private static $_symlinks = array();
-    
-    /**
-     * @var string path to prepend
-     */
-    private static $_prependPath = null;
-    
-    private static function _trimUrls($css)
-    {
-        return preg_replace('/
-            url\\(      # url(
-            \\s*
-            ([^\\)]+?)  # 1 = URI (assuming does not contain ")")
-            \\s*
-            \\)         # )
-        /x', 'url($1)', $css);
-    }
-    
-    private static function _processUriCB($m)
-    {
-        // $m matched either '/@import\\s+([\'"])(.*?)[\'"]/' or '/url\\(\\s*([^\\)\\s]+)\\s*\\)/'
-        $isImport = ($m[0][0] === '@');
-        // determine URI and the quote character (if any)
-        if ($isImport) {
-            $quoteChar = $m[1];
-            $uri = $m[2];
-        } else {
-            // $m[1] is either quoted or not
-            $quoteChar = ($m[1][0] === "'" || $m[1][0] === '"')
-                ? $m[1][0]
-                : '';
-            $uri = ($quoteChar === '')
-                ? $m[1]
-                : substr($m[1], 1, strlen($m[1]) - 2);
-        }
-        // analyze URI
-        if ('/' !== $uri[0]                  // root-relative
-            && false === strpos($uri, '//')  // protocol (non-data)
-            && 0 !== strpos($uri, 'data:')   // data protocol
-        ) {
-            // URI is file-relative: rewrite depending on options
-            $uri = (self::$_prependPath !== null)
-                ? (self::$_prependPath . $uri)
-                : self::rewriteRelative($uri, self::$_currentDir, self::$_docRoot, self::$_symlinks);
-        }
-        return $isImport
-            ? "@import {$quoteChar}{$uri}{$quoteChar}"
-            : "url({$quoteChar}{$uri}{$quoteChar})";
-    }
-    
-    /**
-     * Rewrite a file relative URI as root relative
+     * Get a root relative URI from a file relative URI
      *
      * <code>
      * Minify_CSS_UriRewriter::rewriteRelative(
@@ -236,21 +169,39 @@ class Minify_CSS_UriRewriter {
         self::$debugText .= "docroot stripped   : {$path}\n";
         
         // fix to root-relative URI
-
         $uri = strtr($path, '/\\', '//');
-
-        // remove /./ and /../ where possible
-        $uri = str_replace('/./', '/', $uri);
-        // inspired by patch from Oleg Cherniy
-        do {
-            $uri = preg_replace('@/[^/]+/\\.\\./@', '/', $uri, 1, $changed);
-        } while ($changed);
+        $uri = self::removeDots($uri);
       
         self::$debugText .= "traversals removed : {$uri}\n\n";
         
         return $uri;
     }
+
+    /**
+     * Remove instances of "./" and "../" where possible from a root-relative URI
+     *
+     * @param string $uri
+     *
+     * @return string
+     */
+    public static function removeDots($uri)
+    {
+        $uri = str_replace('/./', '/', $uri);
+        // inspired by patch from Oleg Cherniy
+        do {
+            $uri = preg_replace('@/[^/]+/\\.\\./@', '/', $uri, 1, $changed);
+        } while ($changed);
+        return $uri;
+    }
     
+    /**
+     * Defines which class to call as part of callbacks, change this
+     * if you extend Minify_CSS_UriRewriter
+     *
+     * @var string
+     */
+    protected static $className = 'Consolidate\Minify_CSS_UriRewriter';
+
     /**
      * Get realpath with any trailing slash removed. If realpath() fails,
      * just remove the trailing slash.
@@ -261,10 +212,126 @@ class Minify_CSS_UriRewriter {
      */
     protected static function _realpath($path)
     {
-        $realPath = realpath2($path);
+        $realPath = realpath($path);
         if ($realPath !== false) {
             $path = $realPath;
         }
         return rtrim($path, '/\\');
+    }
+
+    /**
+     * Directory of this stylesheet
+     *
+     * @var string
+     */
+    private static $_currentDir = '';
+
+    /**
+     * DOC_ROOT
+     *
+     * @var string
+     */
+    private static $_docRoot = '';
+
+    /**
+     * directory replacements to map symlink targets back to their
+     * source (within the document root) E.g. '/var/www/symlink' => '/var/realpath'
+     *
+     * @var array
+     */
+    private static $_symlinks = array();
+
+    /**
+     * Path to prepend
+     *
+     * @var string
+     */
+    private static $_prependPath = null;
+
+    /**
+     * @param string $css
+     *
+     * @return string
+     */
+    private static function _trimUrls($css)
+    {
+        return preg_replace('/
+            url\\(      # url(
+            \\s*
+            ([^\\)]+?)  # 1 = URI (assuming does not contain ")")
+            \\s*
+            \\)         # )
+        /x', 'url($1)', $css);
+    }
+
+    /**
+     * @param array $m
+     *
+     * @return string
+     */
+    private static function _processUriCB($m)
+    {
+        // $m matched either '/@import\\s+([\'"])(.*?)[\'"]/' or '/url\\(\\s*([^\\)\\s]+)\\s*\\)/'
+        $isImport = ($m[0][0] === '@');
+        // determine URI and the quote character (if any)
+        if ($isImport) {
+            $quoteChar = $m[1];
+            $uri = $m[2];
+        } else {
+            // $m[1] is either quoted or not
+            $quoteChar = ($m[1][0] === "'" || $m[1][0] === '"')
+                ? $m[1][0]
+                : '';
+            $uri = ($quoteChar === '')
+                ? $m[1]
+                : substr($m[1], 1, strlen($m[1]) - 2);
+        }
+        // if not root/scheme relative and not starts with scheme
+        if (!preg_match('~^(/|[a-z]+\:)~', $uri)) {
+            // URI is file-relative: rewrite depending on options
+            if (self::$_prependPath === null) {
+                $uri = self::rewriteRelative($uri, self::$_currentDir, self::$_docRoot, self::$_symlinks);
+            } else {
+                $uri = self::$_prependPath . $uri;
+                if ($uri[0] === '/') {
+                    $root = '';
+                    $rootRelative = $uri;
+                    $uri = $root . self::removeDots($rootRelative);
+                } elseif (preg_match('@^((https?\:)?//([^/]+))/@', $uri, $m) && (false !== strpos($m[3], '.'))) {
+                    $root = $m[1];
+                    $rootRelative = substr($uri, strlen($root));
+                    $uri = $root . self::removeDots($rootRelative);
+                }
+            }
+        }
+        return $isImport
+            ? "@import {$quoteChar}{$uri}{$quoteChar}"
+            : "url({$quoteChar}{$uri}{$quoteChar})";
+    }
+
+    /**
+     * Mungs some inline SVG URL declarations so they won't be touched
+     *
+     * @link https://github.com/mrclay/minify/issues/517
+     * @see _unOwlify
+     *
+     * @param string $css
+     * @return string
+     */
+    private static function _owlifySvgPaths($css) {
+        return preg_replace('~\b((?:clip-path|mask|-webkit-mask)\s*\:\s*)url(\(\s*#\w+\s*\))~', '$1owl$2', $css);
+
+    }
+
+    /**
+     * Undo work of _owlify
+     *
+     * @see _owlifySvgPaths
+     *
+     * @param string $css
+     * @return string
+     */
+    private static function _unOwlify($css) {
+        return preg_replace('~\b((?:clip-path|mask|-webkit-mask)\s*\:\s*)owl~', '$1url', $css);
     }
 }

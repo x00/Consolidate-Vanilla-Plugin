@@ -2,510 +2,501 @@
 $PluginInfo['Consolidate'] = array(
    'Name' => 'Consolidate',
    'Description' => 'Combine resources (js, css) according to regex patterns, to have the ideal number of requests, and minimise bloat.',
-   'Version' => '0.2.0b',
-   'RequiredApplications' => array('Vanilla' => '2.2'),
+   'Version' => '0.2.1b',
+   'RequiredApplications' => array('Vanilla' => '2.3'),
    'Author' => "Paul Thomas",
    'AuthorEmail' => 'dt01pq_pt@yahoo.com',
    'AuthorUrl' => 'http://vanillaforums.org/profile/x00',
    'SettingsUrl' => '/dashboard/settings/consolidate',
-   'MobileFriendy' => TRUE
+   'MobileFriendy' => true
 );
 
 
 
 define('CONSOLIDATE_ROOT', dirname(__FILE__));
 
-if(!class_exists('Minify_CSS_UriRewriter')){
-    include_once(CONSOLIDATE_ROOT.DS.'CSS'.DS.'UriRewriter.php');
-}
-
-if(!class_exists('Minify_CSS_Compressor')){
-    include_once(CONSOLIDATE_ROOT.DS.'CSS'.DS.'Compressor.php');
-}
-
-if(C('Plugins.Consolidate.DeferJs') && !class_exists('HeadModule', FALSE)){
-    include_once(CONSOLIDATE_ROOT.DS.'class.headmodule.php');
-}
-
-if(!function_exists('realpath2')){
-    function realpath2($path) {
-       $parts = explode('/', str_replace('\\', '/', $path));
-       $result = array();
-
-       foreach ($parts as $part) {
-          if (!$part || $part == '.')
-             continue;
-          if ($part == '..')
-             array_pop($result);
-          else
-             $result[] = $part;
-       }
-       $result = '/'.implode('/', $result);
-
-       // Do a sanity check.
-       if (realpath($result) != realpath($path))
-          $result = realpath($path);
-
-       return $result;
-    }
-}
+include_once(CONSOLIDATE_ROOT.DS.'CSS'.DS.'UriRewriter.php');
+include_once(CONSOLIDATE_ROOT.DS.'CSS'.DS.'Compressor.php');
 
 class Consolidate extends Gdn_Plugin {
-    
-   protected $Checked = FALSE;
-    
-   protected $WebRoot = '';
+
+    protected $checked = false;
+
+    protected $webRoot = '';
+
+    protected $chunks = array();
+    protected $chunkedFiles = array();
+    protected $deferJs = array();
+    protected $externalJs = array();
+    protected $inlineJs = array();
+    protected $inlineJsStrings = array();
+    protected $cdns = array();
    
-   protected $Chunks = array();
-   protected $ChunkedFiles = array();
-   protected $DeferJs = array();
-   protected $ExternalJs = array();
-   protected $InlineJs = array();
-   protected $InlineJsStrings = array();
-   protected $Cdns = array();
-   
-   protected function ChunkedFiles($Put = array(),$Save = TRUE){
-       $Token = 'chunked_files';
-       $CacheFile = PATH_CACHE."/Consolidate/$Token";
-       //check cache
-       if(file_exists($CacheFile)){
-           $Put = array_merge($Put,Gdn_Format::Unserialize(file_get_contents($CacheFile)));
-           $Put = array_unique($Put);
-           if(!$Save)
-              return $Put;
-       }
-       //save
-       if($Save && !empty($Put)){
-           if (!file_exists(dirname($CacheFile)))
-                mkdir(dirname($CacheFile), 0777, TRUE);
-           file_put_contents($CacheFile, Gdn_Format::Serialize($Put));
-       }
+    protected function chunkedFiles($put = array(), $save = true){
+        $token = 'chunked_files';
+        $cacheFile = PATH_CACHE."/Consolidate/$token";
+        //check cache
+        if (file_exists($cacheFile)) {
+            $put = array_merge($put,Gdn_Format::unserialize(file_get_contents($cacheFile)));
+            $put = array_unique($put);
+            if (!$save) {
+                return $put;
+            }
+        }
+        //save
+        if ($save && !empty($put)) {
+            if (!file_exists(dirname($cacheFile))) {
+                mkdir(dirname($cacheFile), 0777, true);
+            }
+            file_put_contents($cacheFile, Gdn_Format::serialize($put));
+        }
        
-       return $Put;
-   }
-   
-   protected function GetChunks(){
-      $this->Chunks = C('Plugins.Consolidate.Chunks',
-        array(
-            '.js' => array(
-                '/?js/library/jquery.js',
-                '/?js/global.js',
-                '/?js/.*',
-                '/?applications/.*',
-                '/?plugins/.*',
-                '/?themes/.*',
-                '.*'
-            ),
-            '.css' => array(
-                '/?applications/.*',
-                '/?resources/.*',
-                '/?plugins/.*',
-                '/?themes/.*',
-                '.*'
-            )
-        )
-      );
-      
-      $this->ChunkedFiles = $this->ChunkedFiles(array());
-   } 
-   
-    public function Base_GetAppSettingsMenuItems_Handler($Sender) {
-        $Menu = $Sender->EventArguments['SideMenu'];
-        $Menu->AddLink('Site Settings', T('Consolidate'), 'settings/consolidate', 'Garden.Settings.Manage');
+        return $put;
     }
    
-   public function SettingsController_Consolidate_Create($Sender,$Args){
-        $Sender->Permission('Garden.Settings.Manage');
-        if($Sender->Form->IsPostBack() != False){
-            $FormValues = $Sender->Form->FormValues();
-            if(GetValue('ClearCache',$FormValues)){
-                $this->_ClearCache();
-                Redirect('settings/consolidate');
+    protected function getChunks(){
+        $this->chunks = c('Plugins.Consolidate.Chunks',
+        array(
+                '.js' => array(
+                    '/?js/library/jquery.js',
+                    '/?js/global.js',
+                    '/?js/.*',
+                    '/?applications/.*',
+                    '/?plugins/.*',
+                    '/?themes/.*',
+                    '.*'
+                ),
+                '.css' => array(
+                    '/?applications/.*',
+                    '/?resources/.*',
+                    '/?plugins/.*',
+                    '/?themes/.*',
+                    '.*'
+                )
+            )
+        );
+      
+        $this->chunkedFiles = $this->chunkedFiles(array());
+    } 
+   
+    public function base_getAppSettingsMenuItems_handler($sender) {
+        $menu = $sender->EventArguments['SideMenu'];
+        $menu->addLink('Site Settings', t('Consolidate'), 'settings/consolidate', 'Garden.Settings.Manage');
+    }
+   
+    public function settingsController_consolidate_create($sender, $args){
+        $sender->permission('Garden.Settings.Manage');
+        if ($sender->Form->isPostBack() != false) {
+            $formValues = $sender->Form->formValues();
+            if (val('ClearCache',$formValues)){
+                $this->clearCache();
+                redirect('settings/consolidate');
             }
-            $ChunkGroups = array();
-            foreach($FormValues['Chunks'] As $ChunkGroupIndex => $Chunk){
+            $chunkGroups = array();
+            foreach ($formValues['Chunks'] As $chunkGroupIndex => $chunk) {
                 
-                if(!is_string($Chunk) || preg_match('`^\s*$`',$Chunk))
+                if (!is_string($chunk) || preg_match('`^\s*$`',$chunk)) {
                     continue;
+                }
                 
-                $Ext = $FormValues['ChunksExt'][$ChunkGroupIndex];
+                $ext = $formValues['ChunksExt'][$chunkGroupIndex];
                 
-                if(!is_string($Ext))
+                if (!is_string($ext)) {
                     continue;
+                }
                 
-                if(!GetValue($Ext,$ChunkGroups))
-                    $ChunkGroups[$Ext] = array();
+                if (!val($ext,$chunkGroups)) {
+                    $chunkGroups[$ext] = array();
+                }
                 //in absense of escaping. 2.1
-                $ChunkGroups[$Ext][] = trim(preg_replace('`([\'\$])`','\\\$1',$Chunk));
+                $chunkGroups[$ext][] = trim(preg_replace('`([\'\$])`','\\\$1',$chunk));
             }
             
-            foreach($ChunkGroups As $Ext => $ChunkGroup){
+            foreach ($chunkGroups As $ext => $chunkGroup) {
                 //ensure remainder (.*) is applied at end
-                $I = array_search('.*',$ChunkGroups[$Ext]);
-                if($I > -1){
-                    unset($ChunkGroups[$Ext][$I]);
+                $i = array_search('.*',$chunkGroups[$ext]);
+                if($i > -1){
+                    unset($chunkGroups[$ext][$i]);
                 }
-                $ChunkGroups[$Ext][] = '.*';
+                $chunkGroups[$ext][] = '.*';
             } 
-            SaveToConfig('Plugins.Consolidate.DeferJs',GetValue('DeferJs',$FormValues) ? TRUE : FALSE);
-            if(!empty($ChunkGroups)){
-                SaveToConfig('Plugins.Consolidate.Chunks',$ChunkGroups);
-
+            saveToConfig('Plugins.Consolidate.DeferJs',val('DeferJs', $formValues) ? true : false);
+            if (!empty($chunkGroups)) {
+                saveToConfig('Plugins.Consolidate.Chunks', $chunkGroups);
             }
-            if(!empty($ChunkGroups) || GetValue('DeferJs',$FormValues)){
-                Redirect('settings/consolidate');
+            if (!empty($chunkGroups) || val('deferJs', $formValues)) {
+                redirect('settings/consolidate');
             }
         }
-        $Sender->AddSideMenu('settings/consolidate');
-        $Sender->SetData('Title', T('Consolidate Settings'));
-        $Sender->AddJsFile('consolidate.js','plugins/Consolidate');
-        $this->GetChunks();
-        $Sender->SetData('Chunks',$this->Chunks);
-        $Sender->Render($this->GetView('consolidate.php'));
-   }
+        $sender->addSideMenu('settings/consolidate');
+        $sender->setData('Title', t('Consolidate Settings'));
+        $sender->addJsFile('consolidate.js', 'plugins/Consolidate');
+        $this->getChunks();
+        $sender->setData('Chunks', $this->chunks);
+        $sender->Render($this->getView('consolidate.php'));
+    }
    
-   public function Base_AfterJsCdns_Handler($Sender){
-        $this->Cdns = $Sender->EventArguments['Cdns'];
-   }
+    public function base_afterJscdns_handler($sender){
+        $this->cdns = $sender->EventArguments['Cdns'];
+    }
     
-   public function HeadModule_BeforeToString_Handler($Head) {
-      if($this->Checked)
-        return;
+    public function headModule_beforeToString_handler($head) {
+        if ($this->checked) {
+            return;
+        }
         
-      $this->Checked = TRUE; 
+        $this->checked = true; 
        
-      $this->WebRoot = Gdn::Request()->WebRoot();
+        $this->webRoot = Gdn::request()->webRoot();
       
-      $this->GetChunks();
-      $this->_ExpireDeadCacheFiles();
+        $this->getChunks();
+        $this->expireDeadCacheFiles();
       
-      $Tags = $Head->Tags();
-      $CssToCache = array();
-      $JsToCache = array(); 
-      $ExternalJs = array();
-      // Process all tags, finding JS & CSS files
-      foreach ($Tags as $Index => $Tag) {
-         $IsJs = GetValue(HeadModule::TAG_KEY, $Tag) == 'script';
-         $IsCss = GetValue(HeadModule::TAG_KEY, $Tag) == 'link' && GetValue('rel', $Tag) == 'stylesheet';
-         if (!$IsJs && !$IsCss)
-            continue;
-
-        if($IsCss){
-            $Href = GetValue('href', $Tag, '!');
-        } else {
-            $Href = GetValue('src', $Tag, '!');
-            
-            if(isset($Tag[HeadModule::CONTENT_KEY])) {
-                $Href = '!';
-                unset($Tags[$Index]['src']);
-            }
-            
-            if(C('Plugins.Consolidate.DeferJs') && $Href=='!'){
-                $this->InlineJs[] = $Tag;
-                unset($Tags[$Index]);
+        $tags = $head->tags();
+        $cssToCache = array();
+        $jsToCache = array(); 
+        $externalJs = array();
+        // Process all tags, finding JS & CSS files
+        foreach ($tags as $index => $tag) {
+            $isJs = val(HeadModule::TAG_KEY, $tag) == 'script';
+            $isCss = val(HeadModule::TAG_KEY, $tag) == 'link' && val('rel', $tag) == 'stylesheet';
+            if (!$isJs && !$isCss) {
                 continue;
             }
-            if(C('Plugins.Consolidate.DeferJs') && $Href[0] != '/'){
-                $this->ExternalJs[] = $Tag;
-                unset($Tags[$Index]);
+            
+            if ($isCss) {
+                $href = val('href', $tag, '!');
+            } else {
+                $href = val('src', $tag, '!');
+            
+                if (isset($tag[HeadModule::CONTENT_KEY])) {
+                    $href = '!';
+                    unset($tags[$index]['src']);
+                }
+            
+                if(c('Plugins.Consolidate.DeferJs') && $href=='!'){
+                    $this->inlineJs[] = $tag;
+                    unset($tags[$index]);
+                    continue;
+                }
+                if(c('Plugins.Consolidate.DeferJs') && $href[0] != '/'){
+                    $this->externalJs[] = $tag;
+                    unset($tags[$index]);
+                    continue;
+                }
+            }
+        
+            //ensure that cdn files are loaded first. 
+            if (!empty($this->cdns) && in_array($href, $this->cdns)) {
+                $tag['_sort']=intval($tag['_sort'])-300;
+                $tags[$index] = $tag;
+            }
+            
+        
+             // Skip the rest if path doesn't start with a slash
+            if ($href[0] != '/') {
                 continue;
             }
 
-        }
-        
-        //ensure that cdn files are loaded first. 
-        if(!empty($this->Cdns) && in_array($Href,$this->Cdns)){
-            $Tag['_sort']=intval($Tag['_sort'])-300;
-            $Tags[$Index] = $Tag;
-        }
-        
-        
-         // Skip the rest if path doesn't start with a slash
-         if ($Href[0] != '/')
-            continue;
-
-         // Strip any querystring off the href.
-         $HrefWithVersion = $Href;
-         $Href = preg_replace('`\?.*`', '', $Href);
+            // Strip any querystring off the href.
+            $hrefWithVersion = $href;
+            $href = preg_replace('`\?.*`', '', $href);
          
-         // Strip WebRoot & extra slash from Href 
-         if($this->WebRoot != '')
-            $Href = preg_replace("`^/{$this->WebRoot}/`U", '', $Href);
-            
-         
-            
-         // Skip the rest if the file doesn't exist
-         $FixPath = ($Href[0] != '/') ? '/' : ''; // Put that slash back to test for it in file structure
-         $Path = PATH_ROOT . $FixPath . $Href;
-         if (!file_exists($Path))
-            continue;
+             // Strip webRoot & extra slash from Href 
+            if( $this->webRoot != '') {
+                $href = preg_replace("`^/{$this->webRoot}/`U", '', $href);
+            }
 
-         // Remove from the tag because consolidate is taking care of it.
-         unset($Tags[$Index]);
+            // Skip the rest if the file doesn't exist
+            $fixPath = ($href[0] != '/') ? '/' : ''; // Put that slash back to test for it in file structure
+            $path = PATH_ROOT . $fixPath . $href;
+            if (!file_exists($path)) {
+                continue;
+            }
 
-         // Add the reference to the appropriate cache collection.
-         if ($IsCss) {
-            $CssToCache[] = array('href'=>$Href, 'fullhref'=>$HrefWithVersion);
-         } elseif ($IsJs) {
-            $JsToCache[] = array('href'=>$Href, 'fullhref'=>$HrefWithVersion);
-         }
-         
-      }
-      
-      $Head->Tags($Tags);
-      
-      $ChunkedFilesTemp = $this->ChunkedFiles;
-      $ChunkedCss = $this->_Chunk($CssToCache, '.css');
-      foreach($ChunkedCss As $CssChunkGroup => $CssChunk){
-        $Token = $this->_Consolidate($CssChunk, '.css', $CssChunkGroup);
-        $Head->AddCss("/cache/Consolidate/$Token", 'screen', FALSE);
-      }
-      $Head = $this->_SeperateInlineScripts($Head);
-      Gdn::Controller()->Assets['Head'] = $Head;
-      $ChunkedJs = $this->_Chunk($JsToCache, '.js');
-      foreach($ChunkedJs As $JsChunkGroup => $JsChunk){
-        $Token = $this->_Consolidate($JsChunk, '.js', $JsChunkGroup);
-        if(!C('Plugins.Consolidate.DeferJs')){
-            $Head->AddScript("/cache/Consolidate/$Token", 'text/javascript', (stripos($Token,'_jquery_js')!==FALSE) ? -100 : FALSE);
-        }else{
-            $this->DeferJs[]=$Token;
+            // Remove from the tag because consolidate is taking care of it.
+            unset($tags[$index]);
+
+            // Add the reference to the appropriate cache collection.
+            if ($isCss) {
+                $cssToCache[] = array('href'=>$href, 'fullhref'=>$hrefWithVersion);
+            } elseif ($isJs) {
+                $jsToCache[] = array('href'=>$href, 'fullhref'=>$hrefWithVersion);
+            }
         }
-      }
       
-      sort($this->ChunkedFiles);
-      sort($ChunkedFilesTemp);
-      if($this->ChunkedFiles != $ChunkedFilesTemp){
-          $this->ChunkedFiles($this->ChunkedFiles, TRUE);
-      }
-   }
+        $head->tags($tags);
+      
+        $chunkedFilesTemp = $this->chunkedFiles;
+        $chunkedCss = $this->chunk($cssToCache, '.css');
+        foreach($chunkedCss As $cssChunkGroup => $cssChunk){
+            $token = $this->consolidateFiles($cssChunk, '.css', $cssChunkGroup);
+            $head->addCss("/cache/Consolidate/$token", 'screen', false);
+        }
+        $head = $this->seperateInlineScripts($head);
+        Gdn::controller()->Assets['Head'] = $head;
+        $chunkedJs = $this->chunk($jsToCache, '.js');
+        foreach($chunkedJs As $jsChunkGroup => $jsChunk){
+            $token = $this->consolidateFiles($jsChunk, '.js', $jsChunkGroup);
+            if (!c('Plugins.Consolidate.DeferJs')) {
+                $head->addScript("/cache/Consolidate/$token", 'text/javascript', (stripos($token,'_jquery_js')!==false) ? -100 : false);
+            }else{
+                $this->deferJs[]=$token;
+            }
+        }
+      
+        sort($this->chunkedFiles);
+        sort($chunkedFilesTemp);
+        if($this->chunkedFiles != $chunkedFilesTemp){
+            $this->chunkedFiles($this->chunkedFiles, true);
+        }
+    }
    
-   public function Base_AfterBody_Handler($Sender){
-       if(!empty($this->DeferJs)){
-           $Head = new HeadModule();
-           $SortLast = 0;
+    public function base_afterBody_handler($sender){
+        if (!empty($this->deferJs)) {
+            $head = new HeadModule();
+            $sortLast = 0;
 
-           foreach($this->ExternalJs As $ExternalJs){
-                if(intval($ExternalJs['_sort'])>$SortLast){
-                    $SortLast = intval($ExternalJs['_sort']);
+            foreach($this->externalJs As $externalJs){
+                if(intval($externalJs['_sort'])>$sortLast){
+                    $sortLast = intval($externalJs['_sort']);
                 }
             }
             
-           foreach($this->DeferJs As $Token){
-               $SortLast++;
-               $Head->AddScript("/cache/Consolidate/$Token", 'text/javascript', (stripos($Token,'_jquery_js')!==FALSE) ? -100 : $SortLast);
-           }
-           $Tags = $Head->GetTags();
+            foreach($this->deferJs As $token){
+                $sortLast++;
+                $head->addScript("/cache/Consolidate/$token", 'text/javascript', (stripos($token, '_jquery_js')!==false) ? -100 : $sortLast);
+            }
+            $tags = $head->getTags();
 
+            foreach($this->inlineJs as &$inlineJs) {
+                if (stripos($inlineJs[HeadModule::CONTENT_KEY], 'gdn=window.gdn||{}')!==false) {
+                    $inlineJs['_sort'] = -1000;
+                }
+            }
+            $tags = array_merge($tags, $this->externalJs);
+            $tags = array_merge($tags, $this->inlineJs);
+            $head->tags($tags);
+            $headParts = explode("\n", $head->ToString());
+            $inScript = false;
+            foreach($headParts As $headPart){
+                if ($inScript || stripos($headPart, '<script')!==false) {
+                    echo trim($headPart)."\n";
+                    $inScript = stripos($headPart, '</script>')===false;
+                }
+            }
+            foreach($this->inlineJsStrings As $inlineJsString){
+                echo trim($inlineJsString)."\n";
+            }
+        }
+    }
+   
+    protected function stripHTMLComments($matches){
+        if(preg_match("`(<!--[\s]*\[if[^\]]*\]>[\s]*(-->)?)(.*?)((<!--)?[\s]*<!\[endif\][\s]*-->)`imsU", $matches[0])){
+            return $matches[0];
+        }
+    }
+   
+    protected function escapeCommentedScript($matches){
+        $quote = substr($matches[0], 0, 1);
+        return preg_replace('`(scr)(ipt)`i', '\1'.$quote.'+'.$quote.'\2', $matches[0]);
+    }
+   
+    protected function scriptSeperate($matches){
+        $string = $matches[0];
+        $this->inlineJsStrings[] = $string;
+    }
+   
+    protected function stringsScriptSeperate($strings){
+        $token = 'inline_'.md5(Gdn_Format::Serialize($strings));
+        $cacheFile = PATH_CACHE."/Consolidate/$token";
+        //check cache
+        if (file_exists($cacheFile)) {
+           $inline = Gdn_Format::unserialize(file_get_contents($cacheFile));
+            if (val('Before', $inline)) {
+                $strings = val('Before', $inline);
+            }
+            if (val('After',$inline)) {
+                $this->inlineJsStrings = val('After', $inline);
+            }
+            if (!in_array($token, $this->chunkedFiles)) {
+                $this->chunkedFiles[] = $token;
+            }
+           return $strings;
+        }
+        foreach($strings As &$string){ 
+            //detect script
+            if(stripos($string, '<script')!==false){
+                //remove HTML comments
+                $string = preg_replace_callback("`<!--(.*?)-->`imsU", array($this,'stripHTMLComments'), $string);    
+                //escape quoted scripts
+                $string = preg_replace_callback("`(?<!\\\\)'((.*?)<script[^>]*>(.*?)</script>(.*?))*?(?<!\\\\)'`imsU", array($this,'escapeCommentedScript'), $string);
+                $string = preg_replace_callback("`(?<!\\\\)\"((.*?)<script[^>]*>(.*?)</script>(.*?))*?(?<!\\\\)\"`imsU", array($this,'escapeCommentedScript'), $string);
+                //remove and save inline scripts (including conditional tags)
+                $string = preg_replace_callback("`(<!--[\s]*\[if[^\]]*\]>[\s]*(-->)?)?<script[^>]*>(.*?)</script>((<!--)?[\s]*<!\[endif\][\s]*-->)?`imsU", array($this, 'scriptSeperate'), $string);
+           }
+        }
        
-           $Tags = array_merge($Tags,$this->ExternalJs);
-           $Tags = array_merge($Tags, $this->InlineJs);
-           $Head->Tags($Tags);
-           $HeadParts = split("\n",$Head->ToString());
-           foreach($HeadParts As $HeadPart){
-               if(stripos($HeadPart,'<script')!==FALSE)
-                    echo trim($HeadPart)."\n";
-           }
-           
-           foreach($this->InlineJsStrings As $InlineJsString){
-               echo trim($InlineJsString)."\n";
-           }
-       }
-   }
+        $inline = array();
+        if (!empty($strings)) {
+            $inline['Before'] = $strings;
+        }
+        if (!empty($this->inlineJsStrings)) {
+            $inline['After'] = $this->inlineJsStrings;
+        }
+        //cache
+        if (!empty($inline)) {
+            $inline = Gdn_Format::serialize($inline);
+            if (!file_exists(dirname($cacheFile))) {
+                mkdir(dirname($cacheFile), 0777, true);
+            }
+            file_put_contents($cacheFile, $inline);
+            if(!in_array($token, $this->chunkedFiles)) {
+                $this->chunkedFiles[] = $token;
+            }
+        }
+       
+        return $strings;
+    }
    
-   protected function _StripHTMLComments($Matches){
-       if(preg_match("`(<!--[\s]*\[if[^\]]*\]>[\s]*(-->)?)(.*?)((<!--)?[\s]*<!\[endif\][\s]*-->)`imsU",$Matches[0])){
-           return $Matches[0];
-       }
-   }
-   
-   protected function _EscapeCommentedScript($Matches){
-       $Quote = substr($Matches[0],0,1);
-       return preg_replace('`(scr)(ipt)`i','\1'.$Quote.'+'.$Quote.'\2',$Matches[0]);
-   }
-   
-   protected function _ScriptSeperate($Matches){
-       $String = $Matches[0];
-       $this->InlineJsStrings[] = $String;
-   }
-   
-   protected function _StringsScriptSeperate($Strings){
-       $Token = 'inline_'.md5(Gdn_Format::Serialize($Strings));
-       $CacheFile = PATH_CACHE."/Consolidate/$Token";
-       //check cache
-       if(file_exists($CacheFile)){
-           $Inline = Gdn_Format::Unserialize(file_get_contents($CacheFile));
-           if(GetValue('Before',$Inline)){
-               $Strings = GetValue('Before',$Inline);
-           }
-           if(GetValue('After',$Inline)){
-               $this->InlineJsStrings = GetValue('After',$Inline);
-           }
-           if(!in_array($Token,$this->ChunkedFiles))
-                $this->ChunkedFiles[] = $Token;
-           return $Strings;
-       }
-       foreach($Strings As &$String){ 
-           //detect script
-           if(stripos($String, '<script')!==FALSE){
-               //remove HTML comments
-               $String = preg_replace_callback("`<!--(.*?)-->`imsU",array($this,'_StripHTMLComments'),$String);    
-               //escape quoted scripts
-               $String = preg_replace_callback("`(?<!\\\\)'((.*?)<script[^>]*>(.*?)</script>(.*?))*?(?<!\\\\)'`imsU",array($this,'_EscapeCommentedScript'),$String);
-               $String = preg_replace_callback("`(?<!\\\\)\"((.*?)<script[^>]*>(.*?)</script>(.*?))*?(?<!\\\\)\"`imsU",array($this,'_EscapeCommentedScript'),$String);
-               //remove and save inline scripts (including conditional tags)
-               $String = preg_replace_callback("`(<!--[\s]*\[if[^\]]*\]>[\s]*(-->)?)?<script[^>]*>(.*?)</script>((<!--)?[\s]*<!\[endif\][\s]*-->)?`imsU",array($this,'_ScriptSeperate'),$String);
-               
-               
-           }
-           
+    protected function seperateInlineScripts($head){
+        if (c('Plugins.Consolidate.DeferJs')) {
+            $strings = $head->getStrings();
+            $refObject = new ReflectionObject($head);
+            $refProperty = $refObject->getProperty('_Strings');
+            $refProperty->setAccessible(true);
+            $refProperty->setValue($head, array());
+            $strings = $this->stringsScriptSeperate($strings);
+            foreach($strings As $string) {
+                $head->addString($string);
+            }
        }
        
-       $Inline = array();
-       if(!empty($Strings)){
-           $Inline['Before'] = $Strings;
-       }
-       if(!empty($this->InlineJsStrings)){
-           $Inline['After'] = $this->InlineJsStrings;
-       }
-       //cache
-       if(!empty($Inline)){
-           $Inline = Gdn_Format::Serialize($Inline);
-           if (!file_exists(dirname($CacheFile)))
-                mkdir(dirname($CacheFile), 0777, TRUE);
-           file_put_contents($CacheFile, $Inline);
-           if(!in_array($Token,$this->ChunkedFiles))
-                $this->ChunkedFiles[] = $Token;
-       }
-       
-       return $Strings;
-   }
-   
-   protected function _SeperateInlineScripts($Head){
-       if(C('Plugins.Consolidate.DeferJs')){
-           $Strings = $Head->GetStrings();
-           $Head->ClearStrings();
-           $Strings = $this->_StringsScriptSeperate($Strings);
-           foreach($Strings As $String)
-                $Head->AddString($String);
-
-       }
-       
-       return $Head;
-   }
+       return $head;
+    }
   
    
-   protected function _Chunk($Files, $Suffix) {
-       $Chunks = GetValue(strtolower($Suffix),$this->Chunks);
-       if(empty($Chunks))
-            return array(Gdn_Format::Url('.*')=>$Files);
-       $ChunkedFiles = array();
-       foreach($Chunks As $Chunk){
-           foreach($Files As $FileIndex => $File){
-               if(preg_match('`^'.$Chunk.'`', $File['href'])){
-                   $NiceKey = trim(Gdn_Format::Url(preg_replace('`[^a-z0-9]+`i','_',$Chunk)),'_').'_';
-                   if(!GetValue($NiceKey,$ChunkedFile))
-                        $ChunkedFile[$NiceKey] = array();
-                   $ChunkedFiles[$NiceKey][] = $File;
-                   unset($Files[$FileIndex]);
-               }
-           }
-       }
-       
-       return  $ChunkedFiles;
-   }
+    protected function chunk($files, $suffix) {
+        $chunks = val(strtolower($suffix), $this->chunks);
+        if (empty($chunks)) {
+            return array(Gdn_Format::url('.*')=>$files);
+        }
+        $chunkedFiles = array();
+        foreach($chunks As $chunk){
+            foreach($files As $fileIndex => $file){
+                if(preg_match('`^'.$chunk.'`', $file['href'])){
+                    $niceKey = trim(Gdn_Format::Url(preg_replace('`[^a-z0-9]+`i', '_', $chunk)), '_').'_';
+                    if(!val($niceKey, $chunkedFiles)) {
+                        $chunkedFiles[$niceKey] = array();
+                    }
+                    $chunkedFiles[$niceKey][] = $file;
+                    unset($files[$fileIndex]);
+                }
+            }
+        }
+        return  $chunkedFiles;
+    }
    
    
-   protected function _Consolidate($Files, $Suffix, $Prefix = '') { 
-      $Token = $Prefix.md5(serialize($Files)).$Suffix;
-      $CacheFile = PATH_CACHE."/Consolidate/$Token";
-      if(in_array($Token,$this->ChunkedFiles))
-        return $Token;
-      if (!file_exists($CacheFile)) {
-          $ConsolidateFile = '';
-          $PathRootParts = split(DS,PATH_ROOT);
-          $WebRootParts = split(DS,$this->WebRoot);
-          $Base = join(DS,array_slice($PathRootParts,0,-count($WebRootParts)));
-          foreach($Files As $File){
-              $ConsolidateFile .= "/*\n";
-              $ConsolidateFile .= "* Consolidate '{$File['fullhref']}'\n";
-              $ConsolidateFile .= "*/\n\n";
-              $OriginalFile = PATH_ROOT.DS.$File['href'];
-              $FileStr = file_get_contents($OriginalFile);
-              if($FileStr && strtolower($Suffix)=='.css'){
-                  $FileStr = Minify_CSS_UriRewriter::rewrite($FileStr,dirname($Base.DS.$this->WebRoot.DS.$File['href']),$Base);
-                  $FileStr = Minify_CSS_Compressor::process($FileStr);
-              }
-              $ConsolidateFile .= trim($FileStr);
-              if($FileStr && strtolower($Suffix)=='.js'){
-                  if(substr($ConsolidateFile,-1)!=';')
-                    $ConsolidateFile .= ";";
-              }
-              $ConsolidateFile .= "\n\n";
-          }
-         if (!file_exists(dirname($CacheFile)))
-            mkdir(dirname($CacheFile), 0777, TRUE);
-         file_put_contents($CacheFile, $ConsolidateFile);
-      }
-      if(!in_array($Token,$this->ChunkedFiles))
-          $this->ChunkedFiles[] = $Token;
+    protected function consolidateFiles($files, $suffix, $prefix = '') { 
+        $token = $prefix.md5($this->PluginInfo['Version'].serialize($files)).$suffix;
+        $cacheFile = PATH_CACHE."/Consolidate/$token";
+        if (in_array($token, $this->chunkedFiles)) {
+            return $token;
+        }
+        if (!file_exists($cacheFile)) {
+            $consolidateFile = '';
+            $pathRootParts = explode(DS, PATH_ROOT);
+            $webRootParts = explode(DS, $this->webRoot);
+            $base = join(DS, array_slice($pathRootParts, 0, -count($webRootParts)));
+            foreach ($files As $file) {
+                $consolidateFile .= "/*\n";
+                $consolidateFile .= "* Consolidate '{$file['fullhref']}'\n";
+                $consolidateFile .= "*/\n\n";
+                $originalFile = PATH_ROOT.DS.$file['href'];
+                $fileStr = file_get_contents($originalFile);
+                if ($fileStr && strtolower($suffix)=='.css') {
+                    $fileStr = Consolidate\Minify_CSS_UriRewriter::rewrite($fileStr, dirname($base.DS.$this->webRoot.DS.$file['href']), $base);             
+                    $fileStr = Consolidate\Minify_CSS_Compressor::process($fileStr);
+                }
+                $consolidateFile .= trim($fileStr);
+                if ($fileStr && strtolower($suffix)=='.js') {
+                    if (substr($consolidateFile, -1)!=';') {
+                        $consolidateFile .= ";";
+                    }
+                }
+                $consolidateFile .= "\n\n";
+            }
+            if (!file_exists(dirname($cacheFile))) {
+                mkdir(dirname($cacheFile), 0777, true);
+            }
+            file_put_contents($cacheFile, $consolidateFile);
+        }
+        if (!in_array($token, $this->chunkedFiles)) {
+            $this->chunkedFiles[] = $token;
+        }
       
-      return $Token;
-   }
+        return $token;
+    }
    
-   /**
+    /**
     * Empty cache when disabling this plugin.
     */ 
-   public function OnDisable() { $this->_ClearCache(); }
+    public function onDisable() { $this->ClearCache(); }
    
-   /** 
+    /** 
     * Empty cache when enabling or disabling any other plugin, application, or theme.
     */
-   public function SettingsController_AfterEnablePlugin_Handler() { $this->_ClearCache(); }
-   public function SettingsController_AfterDisablePlugin_Handler() { $this->_ClearCache(); }
-   public function SettingsController_AfterEnableApplication_Handler() { $this->_ClearCache(); }
-   public function SettingsController_AfterDisableApplication_Handler() { $this->_ClearCache(); }
-   public function SettingsController_AfterEnableTheme_Handler() { $this->_ClearCache(); }
-   
-   /**
+    public function settingsController_afterEnablePlugin_handler() { $this->ClearCache(); }
+    public function settingsController_afterDisablePlugin_handler() { $this->ClearCache(); }
+    public function settingsController_afterEnableApplication_handler() { $this->ClearCache(); }
+    public function settingsController_afterDisableApplication_handler() { $this->ClearCache(); }
+    public function settingsController_afterEnableTheme_handler() { $this->ClearCache(); }
+
+    /**
     * Expire cache files.
     */
-   private function _ExpireDeadCacheFiles() {
-      $ExpireLast = C('Plugins.Consolidate.ExpireLast');
-      $Expire = C('Plugins.Consolidate.ExpirePeriod','1 Week');
-      $ExpirePeriod = strtotime($Expire);
-      if(!$ExpireLast){
-          $ExpireLast = $ExpirePeriod;
-      } 
-      if($ExpireLast<$ExpirePeriod)
-        return;
-      $ChunkedFiles = $this->ChunkedFiles;
-      $Files = glob(PATH_CACHE.'/Consolidate/*', GLOB_MARK);
-      foreach ($Files as $File) {
-         $BaseName = basename($File);
-         if($BaseName=='chunked_files' || in_array($BaseName,$ChunkedFiles))
-            continue;
-         if(filemtime($File)<$ExpirePeriod)
-            continue;
-         if (substr($File, -1) != '/')
-            unlink($File);
-      }
+    private function expireDeadCacheFiles() {
+        $expireLast = c('Plugins.Consolidate.ExpireLast');
+        $expire = c('Plugins.Consolidate.ExpirePeriod', '1 Week');
+        $expirePeriod = strtotime($expire);
+        if (!$expireLast) {
+            $expireLast = $expirePeriod;
+        } 
+        if ($expireLast<$expirePeriod) {
+            return;
+        }
+        $chunkedFiles = $this->chunkedFiles;
+        $files = glob(PATH_CACHE.'/Consolidate/*', GLOB_MARK);
+        foreach ($files as $file) {
+            $baseName = basename($file);
+            if ($baseName=='chunked_files' || in_array($baseName, $chunkedFiles)) {
+                continue;
+            }
+            if (filemtime($file)<$expirePeriod) {
+                continue;
+            }
+            if (substr($file, -1) != '/') {
+                unlink($file);
+            }
+        }
       
-      SaveToConfig('Plugins.Consolidate.ExpireLast', time());
-   }
+        saveToConfig('Plugins.Consolidate.ExpireLast', time());
+    }
    
    
-   /**
+    /**
     * Empty cache.
     */
-   private function _ClearCache() {
-      $Files = glob(PATH_CACHE.'/Consolidate/*', GLOB_MARK);
-      foreach ($Files as $File) {
-         if (substr($File, -1) != '/')
-            unlink($File);
-      }
+    private function clearCache() {
+        $files = glob(PATH_CACHE.'/Consolidate/*', GLOB_MARK);
+        foreach ($files as $file) {
+            if (substr($file, -1) != '/') {
+                unlink($file);
+            }
+        }
       
-      $this->ChunkedFiles(array(), TRUE);
-   }
+        $this->chunkedFiles(array(), true);
+    }
    
-    
 }
