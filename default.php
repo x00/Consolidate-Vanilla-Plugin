@@ -8,7 +8,8 @@ $PluginInfo['Consolidate'] = array(
    'AuthorEmail' => 'dt01pq_pt@yahoo.com',
    'AuthorUrl' => 'http://vanillaforums.org/profile/x00',
    'SettingsUrl' => '/dashboard/settings/consolidate',
-   'MobileFriendy' => true
+   'MobileFriendy' => true,
+   'License'=>"GNU GPL2"
 );
 
 
